@@ -1,0 +1,33 @@
+name: Daily lead report
+
+on:
+  schedule:
+    # 11:00 UTC = 6:00 AM Central Daylight Time (CDT, UTC-5).
+    # After clocks fall back in November, Central Standard Time is UTC-6,
+    # so this will fire at 5:00 AM Central until you update it to '0 12 * * *'.
+    - cron: '0 11 * * *'
+  workflow_dispatch: {} # lets you trigger it manually from the Actions tab to test
+
+jobs:
+  run-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run daily report
+        env:
+          JOTFORM_API_KEY: ${{ secrets.JOTFORM_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+        run: node daily-report.js
