@@ -9,27 +9,53 @@ const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const FROM_EMAIL = process.env.FROM_EMAIL; // must be a verified SendGrid sender
 const TO_EMAIL = process.env.TO_EMAIL || 'asegal@think2perform.com';
 
+// Personal/free email providers to exclude - only business emails get researched and reported.
+const PERSONAL_EMAIL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com',
+  'yahoo.com', 'yahoo.co.uk', 'yahoo.ca', 'ymail.com', 'rocketmail.com',
+  'hotmail.com', 'hotmail.co.uk', 'outlook.com', 'live.com', 'msn.com',
+  'icloud.com', 'me.com', 'mac.com',
+  'aol.com',
+  'protonmail.com', 'proton.me',
+  'mail.com', 'gmx.com', 'gmx.us',
+  'yandex.com', 'zoho.com',
+  'comcast.net', 'verizon.net', 'att.net', 'sbcglobal.net', 'cox.net'
+]);
+
+function isBusinessEmail(email) {
+  const domain = (email.split('@')[1] || '').trim().toLowerCase();
+  return domain.length > 0 && !PERSONAL_EMAIL_DOMAINS.has(domain);
+}
+
 async function main() {
   const submissions = await getRecentSubmissions();
 
   if (submissions.length === 0) {
-    await sendEmail(null, 0);
+    await sendEmail(null, 0, 0);
     console.log('No new submissions in the last 24 hours. Notification sent.');
     return;
   }
 
   const leads = [];
+  let skippedPersonal = 0;
+
   for (const sub of submissions) {
     const { name, email } = extractNameEmail(sub);
     if (!email) continue;
+
+    if (!isBusinessEmail(email)) {
+      skippedPersonal++;
+      continue;
+    }
+
     const research = await researchLead(name, email);
     leads.push({ name, email, ...research });
   }
 
   const excelBuffer = await buildExcel(leads);
-  await sendEmail(excelBuffer, leads.length);
+  await sendEmail(excelBuffer, leads.length, skippedPersonal);
 
-  console.log(`Processed and emailed ${leads.length} lead(s).`);
+  console.log(`Processed and emailed ${leads.length} business lead(s). Skipped ${skippedPersonal} personal-email submission(s).`);
 }
 
 // ---- Step 1: Pull yesterday's submissions from Jotform ----
@@ -160,18 +186,22 @@ async function buildExcel(leads) {
 }
 
 // ---- Step 5: Email the report via SendGrid ----
-async function sendEmail(excelBuffer, count) {
+async function sendEmail(excelBuffer, count, skippedPersonal) {
   sgMail.setApiKey(SENDGRID_API_KEY);
 
   const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+
+  const skippedNote = skippedPersonal > 0
+    ? ` (${skippedPersonal} personal-email submission${skippedPersonal === 1 ? '' : 's'} excluded)`
+    : '';
 
   const msg = {
     to: TO_EMAIL,
     from: FROM_EMAIL,
     subject: `State of Values Report - Daily Lead Research (${today})`,
     text: excelBuffer
-      ? `Attached is today's lead research report: ${count} new submission(s) in the last 24 hours.`
-      : 'No new "State of Values Report" submissions in the last 24 hours - nothing to report today.'
+      ? `Attached is today's lead research report: ${count} business lead(s) in the last 24 hours${skippedNote}.`
+      : `No new "State of Values Report" submissions in the last 24 hours - nothing to report today${skippedNote}.`
   };
 
   if (excelBuffer) {
